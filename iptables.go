@@ -21,6 +21,12 @@ func (c *IptablesController) setup() error {
 	}
 	log.Printf("OK: cmd [%s -V] => [%s]", c.path, string(out))
 
+	// Check if we have the necessary permissions
+	checkCmd := exec.Command(c.path, "-t", "nat", "-L")
+	if out, err := checkCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("insufficient permissions to modify iptables rules. Need root privileges: %v, output: %s", err, string(out))
+	}
+
 	cmds := [][]string{
 		{"-t", "nat", "-N", "LB-PREROUTING"},
 		{"-t", "nat", "-A", "PREROUTING", "-j", "LB-PREROUTING"},
@@ -29,17 +35,17 @@ func (c *IptablesController) setup() error {
 	}
 
 	for _, args := range cmds {
-		log.Printf("cmd [%s %s]", c.path, args)
+		log.Printf("cmd [%s %s]", c.path, strings.Join(args, " "))
 		command := exec.Command(c.path, args...)
 		out, err := command.CombinedOutput()
 		if err != nil {
 			if !strings.Contains(string(out), "already exists") {
-				return fmt.Errorf("ERR: cmd [%s %s] => [%s], err: %v", c.path, args, string(out), err)
+				return fmt.Errorf("ERR: cmd [%s %s] => [%s], err: %v", c.path, strings.Join(args, " "), string(out), err)
 			}
 			log.Printf("OK: chain already exists [%s]", string(out))
-			return nil
+			continue
 		}
-		log.Printf("OK: cmd [%s %s] => [%s]", c.path, args, string(out))
+		log.Printf("OK: cmd [%s %s] => [%s]", c.path, strings.Join(args, " "), string(out))
 	}
 	return nil
 }
