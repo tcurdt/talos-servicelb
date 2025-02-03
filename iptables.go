@@ -13,11 +13,13 @@ type IptablesController struct {
 
 func (c *IptablesController) setup() error {
 
-	log.Printf("Testing iptables binary at %s", c.path)
+	log.Printf("cmd [%s -V]", c.path)
 	testCmd := exec.Command(c.path, "-V")
-	if out, err := testCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to execute %s: %v (output: %s)", c.path, err, string(out))
+	out, err := testCmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("ERR: cmd [%s -V] => [%s], err: %v", c.path, string(out), err)
 	}
+	log.Printf("OK: cmd [%s -V] => [%s]", c.path, string(out))
 
 	cmds := [][]string{
 		{"-t", "nat", "-N", "LB-PREROUTING"},
@@ -26,15 +28,18 @@ func (c *IptablesController) setup() error {
 		{"-t", "nat", "-A", "POSTROUTING", "-j", "LB-POSTROUTING"},
 	}
 
-	for _, cmd := range cmds {
-		log.Printf("Executing: %s %v", c.path, cmd)
-		command := exec.Command(c.path, cmd...)
-		if out, err := command.CombinedOutput(); err != nil {
+	for _, args := range cmds {
+		log.Printf("cmd [%s %s]", c.path, args)
+		command := exec.Command(c.path, args...)
+		out, err := command.CombinedOutput()
+		if err != nil {
 			if !strings.Contains(string(out), "already exists") {
-				return fmt.Errorf("%s %v failed: %v, output: %s", c.path, cmd, err, out)
+				return fmt.Errorf("ERR: cmd [%s %s] => [%s], err: %v", c.path, args, string(out), err)
 			}
-			log.Printf("Chain already exists (this is OK): %s", string(out))
+			log.Printf("OK: chain already exists [%s]", string(out))
+			return nil
 		}
+		log.Printf("OK: cmd [%s %s] => [%s]", c.path, args, string(out))
 	}
 	return nil
 }
