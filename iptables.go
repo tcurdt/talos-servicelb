@@ -50,7 +50,7 @@ func (c *IptablesController) setup() error {
 			if !strings.Contains(string(out), "already exists") {
 				return fmt.Errorf("ERR: cmd [%s %s] => [%s], err: %v", c.path, strings.Join(args, " "), string(out), err)
 			}
-			log.Printf("OK: chain already exists [%s]", string(out))
+			log.Printf("OK: chains already exist [%s]", string(out))
 			continue
 		}
 		log.Printf("OK: cmd [%s %s] => [%s]", c.path, strings.Join(args, " "), string(out))
@@ -59,6 +59,8 @@ func (c *IptablesController) setup() error {
 }
 
 func (c *IptablesController) addPort(nodeIP string, servicePort, nodePort int32) error {
+	log.Printf("addPort [%s] servicePort=%d nodePort=%d", nodeIP, servicePort, nodePort)
+
 	cmds := [][]string{
 		{
 			"-t", "nat", "-A", "LB-PREROUTING",
@@ -74,17 +76,21 @@ func (c *IptablesController) addPort(nodeIP string, servicePort, nodePort int32)
 		},
 	}
 
-	for _, cmd := range cmds {
-		log.Printf("Executing: %s %v", c.path, cmd)
-		command := exec.Command(c.path, cmd...)
-		if out, err := command.CombinedOutput(); err != nil {
-			return fmt.Errorf("%s %v failed: %v, output: %s", c.path, cmd, err, out)
+	for _, args := range cmds {
+		log.Printf("cmd [%s %s]", c.path, strings.Join(args, " "))
+		command := exec.Command(c.path, args...)
+		out, err := command.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("ERR: cmd [%s %s] => [%s], err: %v", c.path, strings.Join(args, " "), string(out), err)
 		}
+		log.Printf("OK: cmd [%s %s] => [%s]", c.path, strings.Join(args, " "), string(out))
 	}
 	return nil
 }
 
 func (c *IptablesController) removePort(nodeIP string, servicePort, nodePort int32) error {
+	log.Printf("removePort [%s] servicePort=%d nodePort=%d", nodeIP, servicePort, nodePort)
+
 	cmds := [][]string{
 		{
 			"-t", "nat", "-D", "LB-PREROUTING",
@@ -100,11 +106,13 @@ func (c *IptablesController) removePort(nodeIP string, servicePort, nodePort int
 		},
 	}
 
-	for _, cmd := range cmds {
-		log.Printf("Executing: %s %v", c.path, cmd)
-		if out, err := exec.Command(c.path, cmd...).CombinedOutput(); err != nil {
-			return fmt.Errorf("%s %v failed: %v, output: %s", c.path, cmd, err, out)
+	for _, args := range cmds {
+		log.Printf("cmd [%s %s]", c.path, strings.Join(args, " "))
+		out, err := exec.Command(c.path, args...).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("ERR: cmd [%s %s] => [%s], err: %v", c.path, strings.Join(args, " "), string(out), err)
 		}
+		log.Printf("OK: cmd [%s %s] => [%s]", c.path, strings.Join(args, " "), string(out))
 	}
 	return nil
 }
