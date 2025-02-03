@@ -10,7 +10,7 @@ metadata:
   name: talos-lb-controller
 rules:
   - apiGroups: [""]
-    resources: ["services"]
+    resources: ["services", "services/status"]
     verbs: ["get", "list", "watch", "update", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -44,9 +44,15 @@ spec:
       hostNetwork: true
       containers:
         - name: controller
-          image: talos-lb-controller:latest
+          image: ghcr.io/tcurdt/talos-servicelb:latest
           securityContext:
             privileged: true
+            capabilities:
+              add: ["NET_ADMIN", "NET_RAW"]
+          volumeMounts:
+            - name: iptables
+              mountPath: /sbin/iptables-nft
+              readOnly: true
           resources:
             limits:
               cpu: 100m
@@ -54,3 +60,8 @@ spec:
             requests:
               cpu: 50m
               memory: 64Mi
+      volumes:
+        - name: iptables
+          hostPath:
+            path: /sbin/iptables-nft
+            type: File
