@@ -6,7 +6,6 @@ import (
 	"log"
 	"net"
 	"os/exec"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,16 +15,38 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+type FirewallController interface {
+	setup() error
+	addPort(nodeIP string, servicePort, nodePort int32) error
+	removePort(nodeIP string, servicePort, nodePort int32) error
+}
+
 type Controller struct {
 	clientset       *kubernetes.Clientset
 	serviceInformer cache.SharedIndexInformer
 	nodeIP          string
+	fw              FirewallController
 }
 
 func getPublicIP() (string, error) {
 	ifaces, err := net.Interfaces()
 	if err != nil {
 		return "", fmt.Errorf("failed to get interfaces: %v", err)
+	}
+
+	// let's just print what we found
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok {
+				if ipnet.IP.To4() != nil {
+					log.Printf("Found IF:[%v] IP:[%v]", iface.Name, ipnet.IP.String())
+				}
+			}
+		}
 	}
 
 	for _, iface := range ifaces {
@@ -35,9 +56,6 @@ func getPublicIP() (string, error) {
 		if (iface.Flags & net.FlagLoopback) != 0 {
 			continue
 		}
-		// if iface.Name != "enp1s0" {
-		// 	continue
-		// }
 
 		addrs, err := iface.Addrs()
 		if err != nil {
@@ -46,7 +64,7 @@ func getPublicIP() (string, error) {
 		for _, addr := range addrs {
 			if ipnet, ok := addr.(*net.IPNet); ok {
 				if ipnet.IP.To4() != nil {
-					log.Printf("Picking IP: %v", ipnet.IP.String())
+					log.Printf("Picking IF:[%v] IP[%v]", iface.Name, ipnet.IP.String())
 					return ipnet.IP.String(), nil
 				}
 			}
@@ -55,9 +73,56 @@ func getPublicIP() (string, error) {
 	return "", fmt.Errorf("no public IP found")
 }
 
+func findExecutable(names []string, paths []string) (string, error) {
+	// try PATH
+	for _, name := range names {
+		if path, err := exec.LookPath(name); err == nil {
+			return path, nil
+		}
+	}
+
+	// try common locations
+	for _, basePath := range paths {
+		for _, name := range names {
+			path := basePath + "/" + name
+			if _, err := exec.LookPath(path); err == nil {
+				return path, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("could not find any of %v in PATH or common locations", names)
+}
+
+func getFirewallController() (FirewallController, error) {
+	commonPaths := []string{
+		"/usr/sbin",
+		"/sbin",
+		"/usr/local/sbin",
+		"/usr/local/bin",
+	}
+
+	if nftPath, err := findExecutable([]string{"nft"}, commonPaths); err == nil {
+		return &NftController{path: nftPath}, nil
+	}
+	if iptablesPath, err := findExecutable([]string{"iptables-nft"}, commonPaths); err == nil {
+		return &IptablesController{path: iptablesPath}, nil
+	}
+	return nil, fmt.Errorf("neither nft nor iptables-nft found in PATH or common locations")
+}
+
 func NewController(clientset *kubernetes.Clientset) (*Controller, error) {
 	nodeIP, err := getPublicIP()
 	if err != nil {
+		return nil, err
+	}
+
+	fw, err := getFirewallController()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := fw.setup(); err != nil {
 		return nil, err
 	}
 
@@ -68,6 +133,7 @@ func NewController(clientset *kubernetes.Clientset) (*Controller, error) {
 		clientset:       clientset,
 		serviceInformer: serviceInformer,
 		nodeIP:          nodeIP,
+		fw:              fw,
 	}
 
 	serviceInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -77,23 +143,6 @@ func NewController(clientset *kubernetes.Clientset) (*Controller, error) {
 	})
 
 	return c, nil
-}
-
-func (c *Controller) setupNftables() error {
-	// create table if it doesn't exist
-	cmds := [][]string{
-		{"add", "table", "ip", "nat"},
-		{"add", "chain", "ip", "nat", "prerouting", "{ type nat hook prerouting priority 0; }"},
-		{"add", "chain", "ip", "nat", "postrouting", "{ type nat hook postrouting priority 100; }"},
-	}
-
-	for _, cmd := range cmds {
-		out, err := exec.Command("nft", cmd...).CombinedOutput()
-		if err != nil && !strings.Contains(string(out), "File exists") {
-			return fmt.Errorf("nft %v failed: %v, output: %s", cmd, err, out)
-		}
-	}
-	return nil
 }
 
 func (c *Controller) handleAdd(obj interface{}) {
@@ -124,12 +173,8 @@ func (c *Controller) handleDelete(obj interface{}) {
 }
 
 func (c *Controller) setupLoadBalancer(service *corev1.Service) {
-	if err := c.setupNftables(); err != nil {
-		log.Printf("Error setting up nftables: %v", err)
-		return
-	}
 
-	// get existing ingress IPs
+	// existing ingress IPs
 	ingressIPs := make(map[string]bool)
 	for _, ingress := range service.Status.LoadBalancer.Ingress {
 		ingressIPs[ingress.IP] = true
@@ -143,7 +188,8 @@ func (c *Controller) setupLoadBalancer(service *corev1.Service) {
 		)
 	}
 
-	_, err := c.clientset.CoreV1().Services(service.Namespace).UpdateStatus(context.Background(), service, metav1.UpdateOptions{})
+	_, err := c.clientset.CoreV1().Services(service.Namespace).UpdateStatus(
+		context.Background(), service, metav1.UpdateOptions{})
 	if err != nil {
 		log.Printf("Error updating service status: %v", err)
 		return
@@ -154,27 +200,8 @@ func (c *Controller) setupLoadBalancer(service *corev1.Service) {
 		if targetPort == 0 {
 			continue
 		}
-
-		// add DNAT rule
-		dnatCmd := []string{
-			"add", "rule", "ip", "nat", "prerouting",
-			"ip", "daddr", c.nodeIP,
-			"tcp", "dport", fmt.Sprintf("%d", port.Port),
-			"dnat", "to", fmt.Sprintf(":%d", targetPort),
-		}
-		if out, err := exec.Command("nft", dnatCmd...).CombinedOutput(); err != nil {
-			log.Printf("Error setting up DNAT rule: %v, output: %s", err, out)
-		}
-
-		// add masquerade rule
-		masqCmd := []string{
-			"add", "rule", "ip", "nat", "postrouting",
-			"ip", "daddr", "10.0.0.0/8",
-			"tcp", "dport", fmt.Sprintf("%d", targetPort),
-			"masquerade",
-		}
-		if out, err := exec.Command("nft", masqCmd...).CombinedOutput(); err != nil {
-			log.Printf("Error setting up masquerade rule: %v, output: %s", err, out)
+		if err := c.fw.addPort(c.nodeIP, port.Port, targetPort); err != nil {
+			log.Printf("Error setting up port forwarding: %v", err)
 		}
 	}
 }
@@ -185,23 +212,8 @@ func (c *Controller) cleanupLoadBalancer(service *corev1.Service) {
 		if targetPort == 0 {
 			continue
 		}
-
-		dnatCmd := []string{
-			"delete", "rule", "ip", "nat", "prerouting",
-			"ip", "daddr", c.nodeIP,
-			"tcp", "dport", fmt.Sprintf("%d", port.Port),
-		}
-		if out, err := exec.Command("nft", dnatCmd...).CombinedOutput(); err != nil {
-			log.Printf("Error removing DNAT rule: %v, output: %s", err, out)
-		}
-
-		masqCmd := []string{
-			"delete", "rule", "ip", "nat", "postrouting",
-			"ip", "daddr", "10.0.0.0/8",
-			"tcp", "dport", fmt.Sprintf("%d", targetPort),
-		}
-		if out, err := exec.Command("nft", masqCmd...).CombinedOutput(); err != nil {
-			log.Printf("Error removing masquerade rule: %v, output: %s", err, out)
+		if err := c.fw.removePort(c.nodeIP, port.Port, targetPort); err != nil {
+			log.Printf("Error removing port forwarding: %v", err)
 		}
 	}
 }
