@@ -13,18 +13,26 @@ type IptablesController struct {
 
 func (c *IptablesController) setup() error {
 
-	log.Printf("cmd [%s -V]", c.path)
-	testCmd := exec.Command(c.path, "-V")
-	out, err := testCmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("ERR: cmd [%s -V] => [%s], err: %v", c.path, string(out), err)
+	{
+		args := []string{"-V"}
+		log.Printf("cmd [%s %s]", c.path, strings.Join(args, " "))
+		cmd := exec.Command(c.path, args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("ERR: cmd [%s -V] => [%s], err: %v", c.path, string(out), err)
+		}
+		log.Printf("OK: cmd [%s %s] => [%s]", c.path, strings.Join(args, " "), string(out))
 	}
-	log.Printf("OK: cmd [%s -V] => [%s]", c.path, string(out))
 
-	// Check if we have the necessary permissions
-	checkCmd := exec.Command(c.path, "-t", "nat", "-L")
-	if out, err := checkCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("insufficient permissions to modify iptables rules. Need root privileges: %v, output: %s", err, string(out))
+	{
+		args := []string{"-t", "nat", "-L"}
+		log.Printf("cmd [%s %s]", c.path, strings.Join(args, " "))
+		cmd := exec.Command(c.path, args...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("ERR: cmd [%s -V] => [%s], err: %v", c.path, string(out), err)
+		}
+		log.Printf("OK: cmd [%s %s] => [%s]", c.path, strings.Join(args, " "), string(out))
 	}
 
 	cmds := [][]string{
