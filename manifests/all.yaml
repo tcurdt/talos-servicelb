@@ -56,6 +56,9 @@ spec:
             - name: lib
               mountPath: /lib
               readOnly: true
+            - name: usrlib
+              mountPath: /usr/lib
+              readOnly: true
           resources:
             limits:
               cpu: 100m
@@ -71,4 +74,8 @@ spec:
         - name: lib
           hostPath:
             path: /lib
+            type: Directory
+        - name: usrlib
+          hostPath:
+            path: /usr/lib
             type: Directory
