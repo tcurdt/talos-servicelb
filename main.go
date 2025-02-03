@@ -74,14 +74,6 @@ func getPublicIP() (string, error) {
 }
 
 func findExecutable(names []string, paths []string) (string, error) {
-	// try PATH
-	for _, name := range names {
-		path, err := exec.LookPath(name)
-		log.Printf("LookPath [%s]: %v (err: %v)", name, path, err)
-		if err == nil {
-			return path, nil
-		}
-	}
 
 	// try common locations
 	for _, basePath := range paths {
@@ -92,6 +84,15 @@ func findExecutable(names []string, paths []string) (string, error) {
 			if err == nil {
 				return path, nil
 			}
+		}
+	}
+
+	// try PATH
+	for _, name := range names {
+		path, err := exec.LookPath(name)
+		log.Printf("LookPath [%s]: %v (err: %v)", name, path, err)
+		if err == nil {
+			return path, nil
 		}
 	}
 

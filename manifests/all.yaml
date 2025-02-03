@@ -50,9 +50,12 @@ spec:
             capabilities:
               add: ["NET_ADMIN", "NET_RAW"]
           volumeMounts:
-            - name: iptables
-              mountPath: /sbin/iptables-nft
+            - name: sbin
+              mountPath: /sbin
               readOnly: true
+          env:
+            - name: PATH
+              value: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           resources:
             limits:
               cpu: 100m
@@ -61,7 +64,7 @@ spec:
               cpu: 50m
               memory: 64Mi
       volumes:
-        - name: iptables
+        - name: sbin
           hostPath:
-            path: /sbin/iptables-nft
-            type: File
+            path: /sbin
+            type: Directory
