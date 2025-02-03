@@ -35,9 +35,10 @@ func getPublicIP() (string, error) {
 		if (iface.Flags & net.FlagLoopback) != 0 {
 			continue
 		}
-		if iface.Name != "enp1s0" {
-			continue
-		}
+		// if iface.Name != "enp1s0" {
+		// 	continue
+		// }
+
 		addrs, err := iface.Addrs()
 		if err != nil {
 			continue
@@ -45,12 +46,13 @@ func getPublicIP() (string, error) {
 		for _, addr := range addrs {
 			if ipnet, ok := addr.(*net.IPNet); ok {
 				if ipnet.IP.To4() != nil {
+					log.Printf("Picking IP: %v", ipnet.IP.String())
 					return ipnet.IP.String(), nil
 				}
 			}
 		}
 	}
-	return "", fmt.Errorf("no public IP found on enp1s0")
+	return "", fmt.Errorf("no public IP found")
 }
 
 func NewController(clientset *kubernetes.Clientset) (*Controller, error) {
