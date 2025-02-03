@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 )
@@ -11,6 +12,13 @@ type IptablesController struct {
 }
 
 func (c *IptablesController) setup() error {
+
+	log.Printf("Testing iptables binary at %s", c.path)
+	testCmd := exec.Command(c.path, "-V")
+	if out, err := testCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to execute %s: %v (output: %s)", c.path, err, string(out))
+	}
+
 	cmds := [][]string{
 		{"-t", "nat", "-N", "LB-PREROUTING"},
 		{"-t", "nat", "-A", "PREROUTING", "-j", "LB-PREROUTING"},
@@ -19,10 +27,13 @@ func (c *IptablesController) setup() error {
 	}
 
 	for _, cmd := range cmds {
-		if out, err := exec.Command(c.path, cmd...).CombinedOutput(); err != nil {
+		log.Printf("Executing: %s %v", c.path, cmd)
+		command := exec.Command(c.path, cmd...)
+		if out, err := command.CombinedOutput(); err != nil {
 			if !strings.Contains(string(out), "already exists") {
 				return fmt.Errorf("%s %v failed: %v, output: %s", c.path, cmd, err, out)
 			}
+			log.Printf("Chain already exists (this is OK): %s", string(out))
 		}
 	}
 	return nil
@@ -45,7 +56,9 @@ func (c *IptablesController) addPort(nodeIP string, servicePort, nodePort int32)
 	}
 
 	for _, cmd := range cmds {
-		if out, err := exec.Command(c.path, cmd...).CombinedOutput(); err != nil {
+		log.Printf("Executing: %s %v", c.path, cmd)
+		command := exec.Command(c.path, cmd...)
+		if out, err := command.CombinedOutput(); err != nil {
 			return fmt.Errorf("%s %v failed: %v, output: %s", c.path, cmd, err, out)
 		}
 	}
@@ -69,6 +82,7 @@ func (c *IptablesController) removePort(nodeIP string, servicePort, nodePort int
 	}
 
 	for _, cmd := range cmds {
+		log.Printf("Executing: %s %v", c.path, cmd)
 		if out, err := exec.Command(c.path, cmd...).CombinedOutput(); err != nil {
 			return fmt.Errorf("%s %v failed: %v, output: %s", c.path, cmd, err, out)
 		}
