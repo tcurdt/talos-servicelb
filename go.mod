@@ -2,7 +2,7 @@ module vafer.org/talos-servicelb
 
 go 1.26.0
 
-toolchain go1.26.4
+toolchain go1.26.5
 
 require (
 	k8s.io/api v0.36.2
